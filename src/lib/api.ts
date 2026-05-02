@@ -42,6 +42,7 @@ export type WaveSummary = {
 };
 
 export const api = {
+  getActiveWaves: () => request<any>(`/api/v1/waves/active`),
   getWaveDetail: (waveNo: string) =>
     request<any>(`/api/v1/waves/${encodeURIComponent(waveNo)}`),
   getWaveProgress: (waveNo: string) =>
