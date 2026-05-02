@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { api, API_BASE } from "@/lib/api";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
-import { CheckCircle2, QrCode, PackageCheck, Flag, Loader2, RotateCcw } from "lucide-react";
+import { CheckCircle2, QrCode, PackageCheck, Flag, Loader2, RotateCcw, AlertCircle } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -17,9 +17,18 @@ export const Route = createFileRoute("/")({
 type Step = "scan" | "start" | "picking" | "done";
 type LogEntry = { time: string; ok: boolean; label: string; detail?: string };
 
+type MatchedSku = {
+  waveNo: string;
+  sku: string;
+  remaining: number;
+  raw: any;
+};
+
 function Index() {
   const [step, setStep] = useState<Step>("scan");
   const [waveNo, setWaveNo] = useState("");
+  const [scannedSku, setScannedSku] = useState("");
+  const [matched, setMatched] = useState<MatchedSku | null>(null);
   const [operatorId, setOperatorId] = useState("OP001");
   const [manualMode, setManualMode] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -33,16 +42,86 @@ function Index() {
       ...l,
     ]);
 
+  const lookupSku = async (sku: string) => {
+    const code = sku.trim();
+    if (!code) return;
+    setScannedSku(code);
+    setLoading(true);
+    try {
+      // 1) ดึง active waves
+      const activeRes: any = await api.getActiveWaves();
+      log(true, `GET /waves/active`, JSON.stringify(activeRes).slice(0, 200));
+      const waves: any[] = Array.isArray(activeRes)
+        ? activeRes
+        : activeRes?.data ?? [];
+
+      // 2) วนเช็คแต่ละ wave ว่ามี SKU นี้ใน detail หรือไม่
+      let found: MatchedSku | null = null;
+      for (const w of waves) {
+        const wNo = w.wave_no ?? w.waveNo;
+        if (!wNo) continue;
+        try {
+          const detail: any = await api.getWaveDetail(wNo);
+          log(
+            true,
+            `GET /waves/${wNo}`,
+            `checking sku ${code}`,
+          );
+          const skus: any[] =
+            detail?.skus ?? detail?.sku_list ?? detail?.data?.skus ?? [];
+          const hit = skus.find(
+            (s) =>
+              String(s.sku ?? s.sku_code ?? "").toUpperCase() ===
+              code.toUpperCase(),
+          );
+          if (hit) {
+            const remaining = Number(
+              hit.remaining_qty ??
+                hit.remaining ??
+                (Number(hit.total_qty ?? 0) - Number(hit.put_qty ?? 0)),
+            );
+            found = { waveNo: wNo, sku: code, remaining, raw: hit };
+            break;
+          }
+        } catch (err: any) {
+          log(false, `GET /waves/${wNo}`, err.message);
+        }
+      }
+
+      if (!found) {
+        toast.error("ไม่พบ SKU ใน Wave ที่ active", { description: code });
+        return;
+      }
+      if (found.remaining <= 0) {
+        toast.error("SKU นี้ไม่มี remaining เหลือ", {
+          description: `Wave ${found.waveNo}`,
+        });
+        setMatched(found);
+        return;
+      }
+
+      setMatched(found);
+      setWaveNo(found.waveNo);
+      setStep("start");
+      toast.success(`พบ SKU ใน ${found.waveNo}`, {
+        description: `remaining ${found.remaining}`,
+      });
+    } catch (e: any) {
+      log(false, `GET /waves/active`, e.message);
+      toast.error("ดึง active waves ไม่สำเร็จ", { description: e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleScanned = (text: string) => {
-    setWaveNo(text.trim());
-    setStep("start");
-    toast.success("สแกน QR สำเร็จ", { description: text });
+    toast.success("สแกน SKU สำเร็จ", { description: text });
+    void lookupSku(text);
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!waveNo.trim()) return;
-    setStep("start");
+    void lookupSku(scannedSku);
   };
 
   const callStart = async () => {
@@ -93,6 +172,8 @@ function Index() {
   const reset = () => {
     setStep("scan");
     setWaveNo("");
+    setScannedSku("");
+    setMatched(null);
     setPickCount(0);
     setScanError(null);
     setManualMode(false);
@@ -117,8 +198,11 @@ function Index() {
           <Card className="p-4 space-y-4">
             <div className="flex items-center gap-2">
               <QrCode className="h-5 w-5 text-primary" />
-              <h2 className="font-semibold">1. สแกน QR Code Wave</h2>
+              <h2 className="font-semibold">1. สแกน SKU</h2>
             </div>
+            <p className="text-xs text-muted-foreground">
+              สแกนหมายเลข SKU เพื่อตรวจสอบว่ามีอยู่ใน Wave ที่ active หรือไม่
+            </p>
 
             {!manualMode ? (
               <>
@@ -134,24 +218,32 @@ function Index() {
                   className="w-full"
                   onClick={() => setManualMode(true)}
                 >
-                  พิมพ์ Wave No. แทน
+                  พิมพ์ SKU แทน
                 </Button>
               </>
             ) : (
               <form onSubmit={handleManualSubmit} className="space-y-3">
                 <div>
-                  <Label htmlFor="wave">Wave No.</Label>
+                  <Label htmlFor="sku">SKU</Label>
                   <Input
-                    id="wave"
-                    value={waveNo}
-                    onChange={(e) => setWaveNo(e.target.value)}
-                    placeholder="เช่น W2025-0001"
+                    id="sku"
+                    value={scannedSku}
+                    onChange={(e) => setScannedSku(e.target.value)}
+                    placeholder="เช่น SKU-0001"
                     autoFocus
                   />
                 </div>
                 <div className="flex gap-2">
-                  <Button type="submit" className="flex-1" disabled={!waveNo.trim()}>
-                    ถัดไป
+                  <Button
+                    type="submit"
+                    className="flex-1"
+                    disabled={!scannedSku.trim() || loading}
+                  >
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "ตรวจสอบ"
+                    )}
                   </Button>
                   <Button
                     type="button"
@@ -163,15 +255,35 @@ function Index() {
                 </div>
               </form>
             )}
+
+            {matched && matched.remaining <= 0 && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm flex gap-2">
+                <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-destructive">
+                    SKU {matched.sku} ไม่มี remaining
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Wave {matched.waveNo} · remaining {matched.remaining}
+                  </p>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
         {step !== "scan" && (
           <Card className="p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-xs text-muted-foreground">Wave</p>
-                <p className="font-mono font-semibold">{waveNo}</p>
+                <p className="text-xs text-muted-foreground">SKU → Wave</p>
+                <p className="font-mono font-semibold">{scannedSku}</p>
+                <p className="font-mono text-xs text-muted-foreground">
+                  {waveNo}
+                  {matched && (
+                    <> · remaining <span className="text-foreground font-semibold">{matched.remaining}</span></>
+                  )}
+                </p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-muted-foreground">Operator</p>
