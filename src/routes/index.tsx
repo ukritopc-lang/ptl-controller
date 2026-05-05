@@ -165,7 +165,7 @@ function Index() {
         sku: result.sku,
         operator_id: operatorId,
         location_code: loc.location_code,
-        qty: loc.qty_remaining,
+        qty: Number(loc.qty_required),
       };
       const res: any = await api.putConfirm(body);
       log(true, `POST /put/confirm`, JSON.stringify(res).slice(0, 300));
@@ -187,18 +187,15 @@ function Index() {
     if (!result) return;
     setLoading(true);
     try {
+      const codes = pendingLocs.length > 0 ? pendingLocs.map((l) => l.location_code) : [""];
       const body = {
         wave_no: result.wave_no,
         sku: result.sku,
         operator_id: operatorId,
-        location_codes: pendingLocs.map((l) => l.location_code),
+        location_codes: codes,
       };
       const res: any = await api.confirmCancel(body);
       log(true, `POST /confirm/cancel`, JSON.stringify(res).slice(0, 300));
-      if (res?.success === false) {
-        toast.error(res?.message ?? "ปิดงานไม่สำเร็จ");
-        return;
-      }
       toast.success(
         pendingLocs.length === 0 ? "เสร็จสิ้นการสแกน" : `ยกเลิก ${pendingLocs.length} location`,
       );
