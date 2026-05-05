@@ -73,6 +73,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  putConfirm: (body: {
+    wave_no: string;
+    sku: string;
+    operator_id: string;
+    location_code: string;
+    qty: number;
+  }) =>
+    request<any>(`/api/v1/put/confirm`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  confirmCancel: (body: {
+    wave_no: string;
+    sku: string;
+    operator_id: string;
+    location_codes?: string[] | null;
+  }) =>
+    request<any>(`/api/v1/confirm/cancel`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   pauseWave: (waveNo: string, body: { operator_id: string; reason?: string }) =>
     request<any>(`/api/v1/waves/${encodeURIComponent(waveNo)}/pause`, {
       method: "PUT",
