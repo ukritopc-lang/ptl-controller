@@ -52,6 +52,27 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  scanSku: (body: {
+    wave_no: string;
+    sku: string;
+    operator_id: string;
+    device_id: string;
+    zone_id?: number | null;
+  }) =>
+    request<any>(`/api/v1/scan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  confirmScan: (body: {
+    wave_no: string;
+    sku: string;
+    operator_id: string;
+    location_codes?: string[] | null;
+  }) =>
+    request<any>(`/api/v1/confirm/scan`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   pauseWave: (waveNo: string, body: { operator_id: string; reason?: string }) =>
     request<any>(`/api/v1/waves/${encodeURIComponent(waveNo)}/pause`, {
       method: "PUT",
