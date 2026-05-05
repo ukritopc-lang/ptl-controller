@@ -490,6 +490,7 @@ function Stepper({ step }: { step: Step }) {
   const steps: { key: Step; label: string }[] = [
     { key: "scan", label: "สแกน" },
     { key: "confirm", label: "ยืนยัน" },
+    { key: "picking", label: "หยิบ" },
     { key: "done", label: "เสร็จ" },
   ];
   const idx = steps.findIndex((s) => s.key === step);
