@@ -8,13 +8,13 @@ import { Card } from "@/components/ui/card";
 import { api, API_BASE } from "@/lib/api";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
-import { CheckCircle2, QrCode, PackageCheck, Loader2, RotateCcw, AlertCircle } from "lucide-react";
+import { CheckCircle2, QrCode, PackageCheck, Loader2, RotateCcw, Check, Flag } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Step = "scan" | "confirm" | "done";
+type Step = "scan" | "confirm" | "picking" | "done";
 type LogEntry = { time: string; ok: boolean; label: string; detail?: string };
 
 type LocationInfo = {
@@ -47,6 +47,8 @@ function Index() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [putDone, setPutDone] = useState<Record<string, boolean>>({});
+  const [busyLoc, setBusyLoc] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   const log = (ok: boolean, label: string, detail?: string) =>
@@ -56,6 +58,8 @@ function Index() {
     ]);
 
   const totalRemaining = result?.locations.reduce((s, l) => s + (l.qty_remaining ?? 0), 0) ?? 0;
+  const pendingLocs = result?.locations.filter((l) => !putDone[l.location_code]) ?? [];
+  const allDone = result ? pendingLocs.length === 0 : false;
 
   const findWaveForSku = async (sku: string): Promise<string | null> => {
     const activeRes: any = await api.getActiveWaves();
@@ -143,10 +147,65 @@ function Index() {
         return;
       }
       toast.success("ยืนยันการสแกนสำเร็จ");
-      setStep("done");
+      setStep("picking");
     } catch (e: any) {
       log(false, `POST /confirm/scan`, e.message);
       toast.error("ยืนยันไม่สำเร็จ", { description: e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const callPutConfirm = async (loc: LocationInfo) => {
+    if (!result) return;
+    setBusyLoc(loc.location_code);
+    try {
+      const body = {
+        wave_no: result.wave_no,
+        sku: result.sku,
+        operator_id: operatorId,
+        location_code: loc.location_code,
+        qty: loc.qty_remaining,
+      };
+      const res: any = await api.putConfirm(body);
+      log(true, `POST /put/confirm`, JSON.stringify(res).slice(0, 300));
+      if (res?.success === false) {
+        toast.error(res?.message ?? "ยืนยัน put ไม่สำเร็จ");
+        return;
+      }
+      setPutDone((m) => ({ ...m, [loc.location_code]: true }));
+      toast.success(`หยิบ ${loc.location_code} สำเร็จ`);
+    } catch (e: any) {
+      log(false, `POST /put/confirm`, e.message);
+      toast.error("ยืนยัน put ไม่สำเร็จ", { description: e.message });
+    } finally {
+      setBusyLoc(null);
+    }
+  };
+
+  const callFinish = async () => {
+    if (!result) return;
+    setLoading(true);
+    try {
+      const body = {
+        wave_no: result.wave_no,
+        sku: result.sku,
+        operator_id: operatorId,
+        location_codes: pendingLocs.map((l) => l.location_code),
+      };
+      const res: any = await api.confirmCancel(body);
+      log(true, `POST /confirm/cancel`, JSON.stringify(res).slice(0, 300));
+      if (res?.success === false) {
+        toast.error(res?.message ?? "ปิดงานไม่สำเร็จ");
+        return;
+      }
+      toast.success(
+        pendingLocs.length === 0 ? "เสร็จสิ้นการสแกน" : `ยกเลิก ${pendingLocs.length} location`,
+      );
+      setStep("done");
+    } catch (e: any) {
+      log(false, `POST /confirm/cancel`, e.message);
+      toast.error("ปิดงานไม่สำเร็จ", { description: e.message });
     } finally {
       setLoading(false);
     }
@@ -156,6 +215,7 @@ function Index() {
     setStep("scan");
     setScannedSku("");
     setResult(null);
+    setPutDone({});
     setScanError(null);
     setManualMode(false);
   };
