@@ -337,7 +337,7 @@ function Index() {
                 {result.locations.map((l) => (
                   <li
                     key={l.location_code}
-                    className="flex items-center justify-between text-sm rounded-md bg-muted px-3 py-2"
+                    className="flex items-center justify-between gap-2 text-sm rounded-md bg-muted px-3 py-2"
                   >
                     <div>
                       <p className="font-mono font-semibold">{l.location_code}</p>
@@ -346,11 +346,31 @@ function Index() {
                         {l.zone_code ? ` · ${l.zone_code}` : ""}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold">{l.qty_remaining}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {l.qty_put}/{l.qty_required}
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <p className="font-bold">{l.qty_remaining}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {l.qty_put}/{l.qty_required}
+                        </p>
+                      </div>
+                      {step === "picking" &&
+                        (putDone[l.location_code] ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+                            <Check className="h-4 w-4" /> หยิบแล้ว
+                          </span>
+                        ) : (
+                          <Button
+                            size="sm"
+                            onClick={() => callPutConfirm(l)}
+                            disabled={busyLoc === l.location_code}
+                          >
+                            {busyLoc === l.location_code ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              `หยิบ ${l.qty_remaining}`
+                            )}
+                          </Button>
+                        ))}
                     </div>
                   </li>
                 ))}
@@ -374,6 +394,37 @@ function Index() {
             </Button>
             <Button onClick={reset} variant="ghost" className="w-full" size="sm">
               ยกเลิก
+            </Button>
+          </Card>
+        )}
+
+        {step === "picking" && result && (
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <PackageCheck className="h-5 w-5 text-primary" />
+              <h2 className="font-semibold">3. หยิบตามโลเคชั่น</h2>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              กดปุ่ม "หยิบ" ที่แต่ละโลเคชั่นด้านบนเพื่อยืนยันตามจำนวนที่ต้องการ
+              ({result.locations.length - pendingLocs.length}/{result.locations.length})
+            </p>
+            <Button
+              onClick={callFinish}
+              disabled={loading}
+              className="w-full"
+              size="lg"
+              variant={allDone ? "default" : "destructive"}
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : allDone ? (
+                <>
+                  <Flag className="h-4 w-4 mr-2" />
+                  เสร็จสิ้นการสแกน
+                </>
+              ) : (
+                `ยกเลิก ${pendingLocs.length} โลเคชั่นที่เหลือ`
+              )}
             </Button>
           </Card>
         )}
