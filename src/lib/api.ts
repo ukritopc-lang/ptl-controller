@@ -3,6 +3,10 @@ export const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) ??
   "https://ptl-service.5mmm.online";
 
+export const PTL_API_BASE =
+  (import.meta.env.VITE_PTL_API_BASE as string | undefined) ??
+  "http://localhost:3001/api";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -14,6 +18,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const text = await res.text().catch(() => "");
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+  if (res.status === 204 || !text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
+}
+
+async function requestPtl<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${PTL_API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const text = await res.text().catch(() => "");
+  if (!res.ok) {
+    throw new Error(`PTL ${res.status}: ${text || res.statusText}`);
   }
   if (res.status === 204 || !text) return undefined as T;
   try {
@@ -108,5 +132,32 @@ export const api = {
     request<any>(`/api/v1/waves/${encodeURIComponent(waveNo)}/cancel`, {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+};
+
+export type PtlDisplayMode = "auto" | "manual";
+export type PtlEffect = "none" | "blink";
+
+export const ptlApi = {
+  getStatus: () => requestPtl<any>(`/ptl/status`),
+  sendCommand: (body: { command: string; timeout?: number; retry?: number }) =>
+    requestPtl<any>(`/ptl/send`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  display: (body: {
+    address: string;
+    value: string | number;
+    mode?: PtlDisplayMode;
+    effect?: PtlEffect;
+  }) =>
+    requestPtl<any>(`/ptl/display`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  clear: (address: string) =>
+    requestPtl<any>(`/ptl/clear`, {
+      method: "POST",
+      body: JSON.stringify({ address }),
     }),
 };

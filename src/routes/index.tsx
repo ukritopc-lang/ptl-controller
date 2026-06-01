@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QrScanner } from "@/components/QrScanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { api, API_BASE } from "@/lib/api";
+import { api, API_BASE, ptlApi } from "@/lib/api";
+import { usePTLWebSocket } from "@/hooks/usePTLWebSocket";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { CheckCircle2, QrCode, PackageCheck, Loader2, RotateCcw, Check, Flag } from "lucide-react";
@@ -50,6 +51,10 @@ function Index() {
   const [putDone, setPutDone] = useState<Record<string, boolean>>({});
   const [busyLoc, setBusyLoc] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [confirmRequested, setConfirmRequested] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const { isConnected: ptlWsConnected, lastInterrupt } = usePTLWebSocket();
 
   const log = (ok: boolean, label: string, detail?: string) =>
     setLogs((l) => [
@@ -60,6 +65,31 @@ function Index() {
   const totalRemaining = result?.locations.reduce((s, l) => s + (l.qty_remaining ?? 0), 0) ?? 0;
   const pendingLocs = result?.locations.filter((l) => !putDone[l.location_code]) ?? [];
   const allDone = result ? pendingLocs.length === 0 : false;
+
+  const normalizeCode = (value: string) => {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) return trimmed.padStart(4, "0");
+    return trimmed.toUpperCase();
+  };
+
+  const matchesInterrupt = (address: string, locCode: string) =>
+    normalizeCode(address) === normalizeCode(locCode);
+
+  const sendNoActionDisplay = async (locations: LocationInfo[]) => {
+    const tasks = locations.map((loc) =>
+      ptlApi.display({
+        address: loc.location_code,
+        value: loc.qty_remaining ?? loc.qty_required,
+        mode: "auto",
+        effect: "none",
+      }),
+    );
+    const results = await Promise.allSettled(tasks);
+    const failed = results.filter((r) => r.status === "rejected");
+    if (failed.length > 0) {
+      toast.error("ส่งคำสั่ง PTL ไม่ครบ", { description: `ล้มเหลว ${failed.length} จุด` });
+    }
+  };
 
   const findWaveForSku = async (sku: string): Promise<string | null> => {
     const activeRes: any = await api.getActiveWaves();
@@ -109,7 +139,11 @@ function Index() {
         toast.error(res?.message ?? "scan ล้มเหลว");
         return;
       }
-      setResult(res as ScanResult);
+      const nextResult = res as ScanResult;
+      setResult(nextResult);
+      setPutDone({});
+      setConfirmRequested(false);
+      void sendNoActionDisplay(nextResult.locations);
       setStep("confirm");
       toast.success(`พบ ${res.total_locations} locations`);
     } catch (e: any) {
@@ -130,7 +164,7 @@ function Index() {
     void doScan(scannedSku);
   };
 
-  const callConfirm = async () => {
+  const confirmScanApi = async () => {
     if (!result) return;
     setLoading(true);
     try {
@@ -154,6 +188,26 @@ function Index() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const startPtlConfirm = async () => {
+    if (!result) return;
+    setConfirmRequested(true);
+    const tasks = result.locations.map((loc) =>
+      ptlApi.display({
+        address: loc.location_code,
+        value: loc.qty_remaining ?? loc.qty_required,
+        mode: "auto",
+        effect: "blink",
+      }),
+    );
+    const results = await Promise.allSettled(tasks);
+    const failed = results.filter((r) => r.status === "rejected");
+    if (failed.length > 0) {
+      toast.error("ส่งไฟยืนยันไม่ครบ", { description: `ล้มเหลว ${failed.length} จุด` });
+      return;
+    }
+    toast.success("ส่งไฟยืนยันแล้ว กดปุ่ม PTL เพื่อยืนยัน");
   };
 
   const callPutConfirm = async (loc: LocationInfo) => {
@@ -215,7 +269,25 @@ function Index() {
     setPutDone({});
     setScanError(null);
     setManualMode(false);
+    setConfirmRequested(false);
+    setConfirming(false);
   };
+
+  useEffect(() => {
+    if (!lastInterrupt || !result || !confirmRequested || confirming) return;
+    const matched = result.locations.find((loc) => matchesInterrupt(lastInterrupt.address, loc.location_code));
+    if (!matched) return;
+
+    setConfirming(true);
+    void (async () => {
+      try {
+        await confirmScanApi();
+      } finally {
+        setConfirming(false);
+        setConfirmRequested(false);
+      }
+    })();
+  }, [lastInterrupt, result, confirmRequested, confirming]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -382,12 +454,31 @@ function Index() {
               <PackageCheck className="h-5 w-5 text-primary" />
               <h2 className="font-semibold">2. ยืนยันการสแกน</h2>
             </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>PTL WebSocket: {ptlWsConnected ? "Connected" : "Disconnected"}</span>
+              {lastInterrupt ? (
+                <span>ล่าสุด {lastInterrupt.address} · {new Date(lastInterrupt.timestamp).toLocaleTimeString()}</span>
+              ) : (
+                <span>รอยืนยันจากปุ่ม PTL</span>
+              )}
+            </div>
             <p className="text-sm text-muted-foreground">
               เรียก <code className="text-xs">POST /confirm/scan</code> ด้วย{" "}
               {result.locations.length} location code
             </p>
-            <Button onClick={callConfirm} disabled={loading} className="w-full" size="lg">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "ยืนยันการสแกน"}
+            <Button
+              onClick={startPtlConfirm}
+              disabled={loading || confirmRequested || confirming}
+              className="w-full"
+              size="lg"
+            >
+              {loading || confirming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : confirmRequested ? (
+                "รอยืนยันจากปุ่ม PTL"
+              ) : (
+                "ส่งไฟยืนยัน (กดปุ่ม PTL)"
+              )}
             </Button>
             <Button onClick={reset} variant="ghost" className="w-full" size="sm">
               ยกเลิก
